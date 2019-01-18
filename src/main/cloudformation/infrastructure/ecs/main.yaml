@@ -1,0 +1,44 @@
+Description: System -> Infrastructure -> ECS
+
+Parameters:
+    EnvironmentName:
+        Description: An environment name that will be prefixed to resource names
+        Type: String
+
+    VPC:
+        Description: The VPC that the ECS cluster is deployed to
+        Type: AWS::EC2::VPC::Id
+
+Resources:
+
+    ECSCluster:
+        Type: AWS::ECS::Cluster
+        Properties:
+            ClusterName: !Ref EnvironmentName
+
+    ECSTaskExecutionRole:
+        Type: AWS::IAM::Role
+        Properties:
+            Path: /
+            RoleName: !Sub ${EnvironmentName}-ECSTaskExecutionRole
+            AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                -   Effect: Allow
+                    Principal:
+                        Service: ecs-tasks.amazonaws.com
+                    Action: sts:AssumeRole
+            ManagedPolicyArns:
+            - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+Outputs:
+
+    ECSCluster:
+        Description: A reference to the ECS cluster
+        Value: !Ref ECSCluster
+
+    ECSTaskExecutionRoleArn:
+        Description: ECS task execution role
+        Value: !GetAtt ECSTaskExecutionRole.Arn
+
+

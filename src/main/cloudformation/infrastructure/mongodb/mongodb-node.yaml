@@ -1,0 +1,1264 @@
+Description: System -> Infrastructure -> MongoDB -> Node
+Parameters:
+    VPC:
+        Type: 'AWS::EC2::VPC::Id'
+        Description: >-
+            VPC-ID of your existing Virtual Private Cloud (VPC) where you want to
+            depoy MongoDB cluster.
+    MongoDBServerSecurityGroupID:
+        Description: 'ID of the MongoDB Server Access Security Group (e.g., sg-7f16e910)'
+        Type: 'AWS::EC2::SecurityGroup::Id'
+    MongoDBServersSecurityGroupID:
+        Description: >-
+            ID of the MongoDB Inter-Server Communication Security Group (e.g.,
+            sg-7f16e910)
+        Type: 'AWS::EC2::SecurityGroup::Id'
+    MongoDBNodeIAMProfileID:
+        Description: ID of the MongoDB IAM Profile
+        Type: String
+    NodeSubnet:
+        Description: Subnet Id
+        Type: String
+    NodeInstanceType:
+        Description: Amazon EC2 instance type for the MongoDB nodes.
+        Type: String
+        Default: m4.large
+        AllowedValues:
+        - m5.large
+        - m5.xlarge
+        - m5.2xlarge
+        - m5.4xlarge
+        - m5.12xlarge
+        - m5.24xlarge
+        - c5.large
+        - c5.xlarge
+        - c5.2xlarge
+        - c5.4xlarge
+        - c5.9xlarge
+        - c5.18xlarge
+        - x1.16xlarge
+        - x1.32xlarge
+        - r4.large
+        - r4.xlarge
+        - r4.2xlarge
+        - r4.4xlarge
+        - r4.8xlarge
+        - r4.16xlarge
+        - i3.large
+        - i3.xlarge
+        - i3.2xlarge
+        - i3.4xlarge
+        - i3.8xlarge
+        - i3.16xlarge
+        - x1e.32xlarge
+        - x1e.16xlarge
+        - x1e.8xlarge
+        - x1e.4xlarge
+        - x1e.2xlarge
+        - x1e.xlarge
+        - m3.medium
+        - m3.large
+        - m3.xlarge
+        - m3.2xlarge
+        - m4.large
+        - m4.xlarge
+        - m4.2xlarge
+        - m4.4xlarge
+        - m4.10xlarge
+        - c3.large
+        - c3.xlarge
+        - c3.2xlarge
+        - c3.4xlarge
+        - c3.8xlarge
+        - r3.large
+        - r3.xlarge
+        - r3.2xlarge
+        - r3.4xlarge
+        - r3.8xlarge
+        - i2.xlarge
+        - i2.2xlarge
+        - i2.4xlarge
+        - i2.8xlarge
+    ImageId:
+        Description: AMI ID for Instance
+        Type: String
+    ReplicaNodeNameTag:
+        Description: Instance Name
+        Type: String
+    NodeReplicaSetIndex:
+        Description: Instance Index
+        Type: String
+    ReplicaShardIndex:
+        Description: Shard Index
+        Type: String
+    StackName:
+        Description: Name of the parent stack
+        Type: String
+    VolumeSize:
+        Type: String
+        Description: EBS Volume Size (data) to be attached to node in GBs
+        Default: '400'
+    VolumeType:
+        Type: String
+        Description: 'EBS Volume Type (data) to be attached to node in GBs [io1,gp2]'
+        Default: gp2
+        AllowedValues:
+        - gp2
+        - io1
+    Iops:
+        Type: String
+        Description: Iops of EBS volume when io1 type is chosen. Otherwise ignored
+        Default: '100'
+    KeyName:
+        Type: 'AWS::EC2::KeyPair::KeyName'
+        Default: home
+        Description: >-
+            Name of an existing EC2 KeyPair. MongoDB instances will launch with this
+            KeyPair.
+    ClusterReplicaSetCount:
+        Description: Number of Replica Set Members. Choose 1 or 3
+        Type: String
+        Default: '3'
+        AllowedValues:
+        - '1'
+        - '3'
+    MongoDBVersion:
+        Description: MongoDB version
+        Type: String
+        Default: '4.0'
+        AllowedValues:
+        - '4.0'
+        - '3.6'
+        - '3.4'
+        - '3.2'
+    MongoDBAdminUsername:
+        Default: admin
+        NoEcho: 'true'
+        Description: MongoDB admin account username
+        Type: String
+        MinLength: '1'
+        MaxLength: '16'
+        AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+        ConstraintDescription: must begin with a letter and contain only alphanumeric characters.
+    MongoDBAdminPassword:
+        AllowedPattern: '([A-Za-z0-9_@-]{8,32})'
+        ConstraintDescription: >-
+            Input your MongoDB database password, Min 8, Maximum of 32 characters. .
+            Allowed characters are: [A-Za-z0-9_@-]
+        Description: 'Enter your MongoDB Database Password, Min 8, maximum of 32 characters.'
+        NoEcho: 'true'
+        Type: String
+    QSS3BucketName:
+        AllowedPattern: '^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$'
+        Default: aws-quickstart
+        Type: String
+        ConstraintDescription: >-
+            Quick Start bucket name can include numbers, lowercase letters, uppercase
+            letters, and hyphens (-). It cannot start or end with a hyphen (-).
+        Description: >-
+            S3 bucket name for the Quick Start assets. Quick Start bucket name can
+            include numbers, lowercase letters, uppercase letters, and hyphens (-). It
+            cannot start or end with a hyphen (-).
+    QSS3KeyPrefix:
+        AllowedPattern: '^[0-9a-zA-Z-/]*$'
+        Default: quickstart-mongodb/
+        Type: String
+        ConstraintDescription: >-
+            Quick Start key prefix can include numbers, lowercase letters, uppercase
+            letters, hyphens (-), and forward slash (/).
+        Description: >-
+            S3 key prefix for the Quick Start assets. Quick Start key prefix can
+            include numbers, lowercase letters, uppercase letters, hyphens (-), and
+            forward slash (/). It cannot start or end with a hyphen (-).
+Conditions:
+    UsePIops: !Equals
+    - !Ref VolumeType
+    - io1
+Resources:
+    ReplicaNodeNetworkInterface:
+        Type: 'AWS::EC2::NetworkInterface'
+        Properties:
+            Description: Network Interface for Mongo Node
+            SubnetId: !Ref NodeSubnet
+            GroupSet:
+            - !Ref MongoDBServerSecurityGroupID
+            - !Ref MongoDBServersSecurityGroupID
+            SourceDestCheck: 'true'
+            Tags:
+            -   Key: Network
+                Value: Private
+    ReplicaNodeInstance:
+        Type: 'AWS::EC2::Instance'
+        Metadata:
+            HostRole: MongoDB Node
+            AWS::CloudFormation::Init:
+                config:
+                    files:
+                        /tmp/mongo_pass.txt:
+                            content: !Ref MongoDBAdminPassword
+                            mode: '000440'
+                            owner: root
+                            group: root
+                        /etc/init.d/disable-transparent-hugepages:
+                            content: |
+                                #!/bin/bash
+                                ### BEGIN INIT INFO
+                                # Provides:          disable-transparent-hugepages
+                                # Required-Start:    $local_fs
+                                # Required-Stop:
+                                # X-Start-Before:    mongod mongodb-mms-automation-agent
+                                # Default-Start:     2 3 4 5
+                                # Default-Stop:      0 1 6
+                                # Short-Description: Disable Linux transparent huge pages
+                                # Description:       Disable Linux transparent huge pages, to improve
+                                #                    database performance.
+                                ### END INIT INFO
+
+                                case $1 in
+                                  start)
+                                    if [ -d /sys/kernel/mm/transparent_hugepage ]; then
+                                      thp_path=/sys/kernel/mm/transparent_hugepage
+                                    elif [ -d /sys/kernel/mm/redhat_transparent_hugepage ]; then
+                                      thp_path=/sys/kernel/mm/redhat_transparent_hugepage
+                                    else
+                                      return 0
+                                    fi
+
+                                    echo 'never' > ${thp_path}/enabled
+                                    echo 'never' > ${thp_path}/defrag
+
+                                    re='^[0-1]+$'
+                                    if [[ $(cat ${thp_path}/khugepaged/defrag) =~ $re ]]
+                                    then
+                                      # RHEL 7
+                                      echo 0  > ${thp_path}/khugepaged/defrag
+                                    else
+                                      # RHEL 6
+                                      echo 'no' > ${thp_path}/khugepaged/defrag
+                                    fi
+
+                                    unset re
+                                    unset thp_path
+                                    ;;
+                                esac
+                            mode: '000777'
+                        /home/ec2-user/mongodb/init.sh:
+                            content: |
+                                #!/bin/bash
+
+                                #################################################################
+                                # Update the OS, install packages, initialize environment vars,
+                                # and get the instance tags
+                                #################################################################
+                                yum -y update
+                                yum install -y jq
+                                yum install -y xfsprogs
+
+                                source ./orchestrator.sh -i
+                                source ./config.sh
+
+                                tags=`aws ec2 describe-tags --filters "Name=resource-id,Values=${AWS_INSTANCEID}"`
+
+                                #################################################################
+                                #  gatValue() - Read a value from the instance tags
+                                #################################################################
+                                getValue() {
+                                    index=`echo $tags | jq '.[]' | jq '.[] | .Key == "'$1'"' | grep -n true | sed s/:.*//g | tr -d '\n'`
+                                    (( index-- ))
+                                    filter=".[$index]"
+                                    result=`echo $tags | jq '.[]' | jq $filter.Value | sed s/\"//g | sed s/Primary.*/Primary/g | tr -d '\n'`
+                                    echo $result
+                                }
+
+                                ##version=`getValue MongoDBVersion`
+
+                                # MongoDBVersion set inside config.sh
+                                version=${MongoDBVersion}
+
+                                if [ -z "$version" ] ; then
+                                  version="3.6"
+                                fi
+
+                                echo "[mongodb-org-${version}]
+                                name=MongoDB Repository
+                                baseurl=http://repo.mongodb.org/yum/amazon/2013.03/mongodb-org/${version}/x86_64/
+                                gpgcheck=0
+                                enabled=1" > /etc/yum.repos.d/mongodb-org-${version}.repo
+
+                                # To be safe, wait a bit for flush
+                                sleep 5
+
+                                yum --enablerepo=epel install node npm -y
+
+                                yum install -y mongodb-org
+                                yum install -y munin-node
+                                yum install -y libcgroup
+                                yum -y install mongo-10gen-server mongodb-org-shell
+                                yum -y install sysstat
+
+                                #################################################################
+                                #  Figure out what kind of node we are and set some values
+                                #################################################################
+                                NODE_TYPE=`getValue Name`
+                                IP=$(curl http://169.254.169.254/latest/meta-data/local-ipv4)
+                                SHARD=s`getValue ReplicaShardIndex`
+                                NODES=`getValue ClusterReplicaSetCount`
+
+                                #  Do NOT use timestamps here!!
+                                # This has to be unique across multiple runs!
+                                UNIQUE_NAME=MONGODB_${TABLE_NAMETAG}_${VPC}
+
+                                #################################################################
+                                #  Wait for all the nodes to synchronize so we have all IP addrs
+                                #################################################################
+                                if [ "${NODE_TYPE}" == "Primary" ]; then
+                                    ./orchestrator.sh -c -n "${SHARD}_${UNIQUE_NAME}"
+                                    ./orchestrator.sh -s "WORKING" -n "${SHARD}_${UNIQUE_NAME}"
+                                    ./orchestrator.sh -w "WORKING=${NODES}" -n "${SHARD}_${UNIQUE_NAME}"
+                                    IPADDRS=$(./orchestrator.sh -g -n "${SHARD}_${UNIQUE_NAME}")
+                                    read -a IPADDRS <<< $IPADDRS
+                                else
+                                    ./orchestrator.sh -b -n "${SHARD}_${UNIQUE_NAME}"
+                                    ./orchestrator.sh -w "WORKING=1" -n "${SHARD}_${UNIQUE_NAME}"
+                                    ./orchestrator.sh -s "WORKING" -n "${SHARD}_${UNIQUE_NAME}"
+                                    NODE_TYPE="Secondary"
+                                    ./orchestrator.sh -w "WORKING=${NODES}" -n "${SHARD}_${UNIQUE_NAME}"
+                                fi
+
+
+                                #################################################################
+                                # Make filesystems, set ulimits and block read ahead on ALL nodes
+                                #################################################################
+                                mkfs.xfs -f /dev/xvdf
+                                echo "/dev/xvdf /data xfs defaults,auto,noatime,noexec 0 0" | tee -a /etc/fstab
+                                mkdir -p /data
+                                mount /data
+                                chown -R mongod:mongod /data
+                                blockdev --setra 32 /dev/xvdf
+                                rm -rf /etc/udev/rules.d/85-ebs.rules
+                                touch /etc/udev/rules.d/85-ebs.rules
+                                echo 'ACTION=="add", KERNEL=="'$1'", ATTR{bdi/read_ahead_kb}="16"' | tee -a /etc/udev/rules.d/85-ebs.rules
+                                echo "* soft nofile 64000
+                                * hard nofile 64000
+                                * soft nproc 32000
+                                * hard nproc 32000" > /etc/limits.conf
+                                #################################################################
+                                # End All Nodes
+                                #################################################################
+
+                                #################################################################
+                                # Listen to all interfaces, not just local
+                                #################################################################
+
+                                enable_all_listen() {
+                                  for f in /etc/mongo*.conf
+                                  do
+                                    sed -e '/bindIp/s/^/#/g' -i ${f}
+                                    sed -e '/bind_ip/s/^/#/g' -i ${f}
+                                    echo " Set listen to all interfaces : ${f}"
+                                  done
+                                }
+
+                                check_primary() {
+                                    expected_state=$1
+                                    master_substr=\"ismaster\"\ :\ ${expected_state}
+                                    while true; do
+                                      check_master=$( mongo --eval "printjson(db.isMaster())" )
+                                      log "${check_master}..."
+                                      if [[ $check_master == *"$master_substr"* ]]; then
+                                        log "Node is in desired state, proceed with security setup"
+                                        break
+                                      else
+                                        log "Wait for node to become primary"
+                                        sleep 10
+                                      fi
+                                    done
+                                }
+
+                                setup_security_common() {
+                                    DDB_TABLE=$1
+                                    auth_key=$(./orchestrator.sh -f -n $DDB_TABLE)
+                                    echo $auth_key > /mongo_auth/mongodb.key
+                                    chmod 400 /mongo_auth/mongodb.key
+                                    chown -R mongod:mongod /mongo_auth
+                                    sed $'s/processManagement:/security: \\\n  authorization: enabled \\\n  keyFile: \/mongo_auth\/mongodb.key \\\n\\\n&/g' /etc/mongod.conf >> /tmp/mongod_sec.txt
+                                    mv /tmp/mongod_sec.txt /etc/mongod.conf
+                                }
+
+                                setup_security_primary() {
+                                    DDB_TABLE=$1
+                                    port=27017
+                                    MONGO_PASSWORD=$( cat /tmp/mongo_pass.txt )
+
+                                mongo --port ${port} << EOF
+                                use admin;
+                                db.createUser(
+                                  {
+                                    user: "${MONGODB_ADMIN_USER}",
+                                    pwd: "${MONGO_PASSWORD}",
+                                    roles: [ { role: "root", db: "admin" } ]
+                                  }
+                                );
+                                EOF
+
+                                    service mongod stop
+                                    ./orchestrator.sh -k -n $DDB_TABLE
+                                    sleep 5
+                                    setup_security_common $DDB_TABLE
+                                    sleep 5
+                                    service mongod start
+                                    sleep 10
+                                    ./orchestrator.sh -s "SECURED" -n $DDB_TABLE
+                                }
+
+                                #################################################################
+                                # Setup MongoDB servers and config nodes
+                                #################################################################
+                                mkdir /var/run/mongod
+                                chown mongod:mongod /var/run/mongod
+
+                                echo "net:" > mongod.conf
+                                echo "  port:" >> mongod.conf
+                                if [ "$version" == "3.6" ] || [ "$version" == "4.0" ]; then
+                                    echo "  bindIpAll: true" >> mongod.conf
+                                fi
+                                echo "" >> mongod.conf
+                                echo "systemLog:" >> mongod.conf
+                                echo "  destination: file" >> mongod.conf
+                                echo "  logAppend: true" >> mongod.conf
+                                echo "  path: /log/mongod.log" >> mongod.conf
+                                echo "" >> mongod.conf
+                                echo "storage:" >> mongod.conf
+                                echo "  dbPath: /data" >> mongod.conf
+                                echo "  journal:" >> mongod.conf
+                                echo "    enabled: true" >> mongod.conf
+                                echo "" >> mongod.conf
+                                echo "processManagement:" >> mongod.conf
+                                echo "  fork: true" >> mongod.conf
+                                echo "  pidFilePath: /var/run/mongod/mongod.pid" >> mongod.conf
+
+                                #################################################################
+                                #  Enable munin plugins for iostat and iostat_ios
+                                #################################################################
+                                ln -s /usr/share/munin/plugins/iostat /etc/munin/plugins/iostat
+                                ln -s /usr/share/munin/plugins/iostat_ios /etc/munin/plugins/iostat_ios
+                                touch /var/lib/munin/plugin-state/iostat-ios.state
+                                chown munin:munin /var/lib/munin/plugin-state/iostat-ios.state
+
+                                #################################################################
+                                # Make the filesystems, add persistent mounts
+                                #################################################################
+                                mkfs.xfs -f /dev/xvdg
+                                mkfs.xfs -f /dev/xvdh
+
+                                echo "/dev/xvdg /journal xfs defaults,auto,noatime,noexec 0 0" | tee -a /etc/fstab
+                                echo "/dev/xvdh /log xfs defaults,auto,noatime,noexec 0 0" | tee -a /etc/fstab
+
+                                #################################################################
+                                # Make directories for data, journal, and logs
+                                #################################################################
+                                mkdir -p /journal
+                                mount /journal
+
+                                #################################################################
+                                #  Figure out how much RAM we have and how to slice it up
+                                #################################################################
+                                memory=$(vmstat -s | grep "total memory" | sed -e 's/ total.*//g' | sed -e 's/[ ]//g' | tr -d '\n')
+                                memory=$(printf %.0f $(echo "${memory} / 1024 / 1 * .9 / 1024" | bc))
+
+                                if [ ${memory} -lt 1 ]; then
+                                    memory=1
+                                fi
+
+                                #################################################################
+                                #  Make data directories and add symbolic links for journal files
+                                #################################################################
+
+                                mkdir -p /data/
+                                mkdir -p /journal/
+
+                                  # Add links for journal to data directory
+                                ln -s /journal/ /data/journal
+
+                                mkdir -p /log
+                                mount /log
+
+                                #################################################################
+                                # Change permissions to the directories
+                                #################################################################
+                                chown -R mongod:mongod /journal
+                                chown -R mongod:mongod /log
+                                chown -R mongod:mongod /data
+
+                                #################################################################
+                                # Clone the mongod config file and create cgroups for mongod
+                                #################################################################
+                                c=0
+                                port=27017
+
+                                cp mongod.conf /etc/mongod.conf
+                                sed -i "s/.*port:.*/  port: ${port}/g" /etc/mongod.conf
+                                echo "replication:" >> /etc/mongod.conf
+                                echo "  replSetName: ${SHARD}" >> /etc/mongod.conf
+
+                                echo CGROUP_DAEMON="memory:mongod" > /etc/sysconfig/mongod
+
+                                echo "mount {
+                                    cpuset  = /cgroup/cpuset;
+                                    cpu     = /cgroup/cpu;
+                                    cpuacct = /cgroup/cpuacct;
+                                    memory  = /cgroup/memory;
+                                    devices = /cgroup/devices;
+                                  }
+
+                                  group mongod {
+                                    perm {
+                                      admin {
+                                        uid = mongod;
+                                        gid = mongod;
+                                      }
+                                      task {
+                                        uid = mongod;
+                                        gid = mongod;
+                                      }
+                                    }
+                                    memory {
+                                      memory.limit_in_bytes = ${memory}G;
+                                      }
+                                  }" > /etc/cgconfig.conf
+
+
+                                #################################################################
+                                #  Start cgconfig, munin-node, and all mongod processes
+                                #################################################################
+                                chkconfig cgconfig on
+                                service cgconfig start
+
+                                chkconfig munin-node on
+                                service munin-node start
+
+                                echo Running chkconfig mongod on
+                                chkconfig mongod on
+                                if [ "$version" != "3.6" ] && [ "$version" != "4.0" ];  then
+                                    enable_all_listen
+                                fi
+
+                                service mongod start
+
+                                #################################################################
+                                #  Primaries initiate replica sets
+                                #################################################################
+                                if [[ "$NODE_TYPE" == "Primary" ]]; then
+
+                                    #################################################################
+                                    # Wait unitil all the hosts for the replica set are responding
+                                    #################################################################
+                                    for addr in "${IPADDRS[@]}"
+                                    do
+                                        addr="${addr%\"}"
+                                        addr="${addr#\"}"
+
+                                        echo ${addr}:${port}
+                                        while [ true ]; do
+
+                                            echo "mongo --host ${addr} --port ${port}"
+
+                                mongo --host ${addr} --port ${port} << EOF
+                                use admin
+                                EOF
+
+                                            if [ $? -eq 0 ]; then
+                                                break
+                                            fi
+                                            sleep 5
+                                        done
+                                    done
+
+                                    #################################################################
+                                    # Configure the replica sets, set this host as Primary with
+                                    # highest priority
+                                    #################################################################
+                                    if [ "${NODES}" == "3" ]; then
+                                        port=27017
+                                        conf="{\"_id\" : \"${SHARD}\", \"version\" : 1, \"members\" : ["
+                                        node=1
+                                        for addr in "${IPADDRS[@]}"
+                                        do
+                                            addr="${addr%\"}"
+                                            addr="${addr#\"}"
+
+                                            priority=5
+                                            if [ "${addr}" == "${IP}" ]; then
+                                                priority=10
+                                            fi
+                                            conf="${conf}{\"_id\" : ${node}, \"host\" :\"${addr}:${port}\", \"priority\":${priority}}"
+
+                                            if [ $node -lt ${NODES} ]; then
+                                                conf=${conf}","
+                                            fi
+
+                                            (( node++ ))
+                                        done
+
+                                        conf=${conf}"]}"
+                                        echo ${conf}
+
+                                mongo --port ${port} << EOF
+                                rs.initiate(${conf})
+                                EOF
+
+                                        if [ $? -ne 0 ]; then
+                                            # Houston, we've had a problem here...
+                                            exit 1
+                                        fi
+                                    else
+                                        port=27017
+
+                                        priority=10
+                                        conf="{\"_id\" : \"${SHARD}\", \"version\" : 1, \"members\" : ["
+                                        conf="${conf}{\"_id\" : 1, \"host\" :\"${IP}:${port}\", \"priority\":${priority}}"
+                                        conf=${conf}"]}"
+
+                                mongo --port ${port} << EOF
+                                rs.initiate(${conf})
+                                EOF
+
+                                    fi
+
+                                    #################################################################
+                                    #  Update status to FINISHED, if this is s0 then wait on the rest
+                                    #  of the nodes to finish and remove orchestration tables
+                                    #################################################################
+                                    ./orchestrator.sh -s "FINISHED" -n "${SHARD}_${UNIQUE_NAME}"
+                                    ./orchestrator.sh -w "FINISHED=${NODES}" -n "${SHARD}_${UNIQUE_NAME}"
+
+                                    echo "Setting up security, bootstrap table: " "${SHARD}_${UNIQUE_NAME}"
+                                    # wait for mongo to become primary
+                                    sleep 10
+                                    check_primary true
+
+                                    setup_security_primary "${SHARD}_${UNIQUE_NAME}"
+
+                                    ./orchestrator.sh -w "SECURED=${NODES}" -n "${SHARD}_${UNIQUE_NAME}"
+                                    ./orchestrator.sh -d -n "${SHARD}_${UNIQUE_NAME}"
+                                    rm /tmp/mongo_pass.txt
+                                else
+                                    #################################################################
+                                    #  Update status of Secondary to FINISHED
+                                    #################################################################
+                                    ./orchestrator.sh -s "FINISHED" -n "${SHARD}_${UNIQUE_NAME}"
+                                    ./orchestrator.sh -w "FINISHED=${NODES}" -n "${SHARD}_${UNIQUE_NAME}"
+
+                                    ./orchestrator.sh -w "SECURED=1" -n "${SHARD}_${UNIQUE_NAME}"
+                                    service mongod stop
+                                    setup_security_common "${SHARD}_${UNIQUE_NAME}"
+                                    service mongod start
+                                    ./orchestrator.sh -s "SECURED" -n "${SHARD}_${UNIQUE_NAME}"
+                                    rm /tmp/mongo_pass.txt
+
+                                fi
+
+                                # TBD - Add custom CloudWatch Metrics for MongoDB
+
+                                # exit with 0 for SUCCESS
+                                exit 0
+                            mode: '000777'
+                        /home/ec2-user/mongodb/orchestrator.sh:
+                            content: |
+                                #!/bin/bash
+
+
+                                # Install jq to parse meta-data
+                                # MISC=/home/ec2-user/misc/bin/
+                                # mkdir -p ${MISC}
+                                JQ_COMMAND=jq
+                                # [ ! -e ${JQ_COMMAND} ] && wget http://stedolan.github.io/jq/download/linux64/jq -O ${JQ_COMMAND}
+                                # chmod 755 ${JQ_COMMAND}
+                                # sudo yum -y install jq
+
+                                # export PATH=${PATH}:/sbin:/usr/sbin:/usr/local/sbin:/root/bin:/usr/local/bin:/usr/bin:/bin:/usr/bin/X11:/usr/X11R6/bin:/usr/games:/usr/lib/AmazonEC2/ec2-api-tools/bin:/usr/lib/AmazonEC2/ec2-ami-tools/bin:/usr/lib/mit/bin:/usr/lib/mit/sbin:${MISC}
+
+
+                                # ---------------------------------------------------------------------
+                                #          env vars to configure aws cli on Amazon Linux
+                                #          No need for keys etc if run on instance with correct IAM role
+                                # ---------------------------------------------------------------------
+
+
+                                export AWS_DEFAULT_REGION=${REGION}
+                                export AWS_DEFAULT_AVAILABILITY_ZONE=${AVAILABILITY_ZONE}
+
+                                if [ -z ${AWS_DEFAULT_REGION} ]; then
+                                   export AWS_DEFAULT_REGION=$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document \
+                                          | ${JQ_COMMAND} '.region'  \
+                                          | sed 's/^"\(.*\)"$/\1/' )
+                                fi
+                                if [ -z ${AWS_DEFAULT_AVAILABILITY_ZONE} ]; then
+                                   export AWS_DEFAULT_AVAILABILITY_ZONE=$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document \
+                                            | ${JQ_COMMAND} '.availabilityZone' \
+                                            | sed 's/^"\(.*\)"$/\1/' )
+                                fi
+
+                                if [ -z ${AWS_INSTANCEID} ]; then
+                                   export AWS_INSTANCEID=$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document \
+                                            | ${JQ_COMMAND} '.instanceId' \
+                                            | sed 's/^"\(.*\)"$/\1/' )
+                                fi
+
+                                # ------------------------------------------------------------------
+                                #          remove double quotes, if any. cli doesn't like it!
+                                # ------------------------------------------------------------------
+
+                                export AWS_DEFAULT_REGION=$(echo ${AWS_DEFAULT_REGION} | sed 's/^"\(.*\)"$/\1/' )
+                                export AWS_DEFAULT_AVAILABILITY_ZONE=$(echo ${AWS_DEFAULT_AVAILABILITY_ZONE} | sed 's/^"\(.*\)"$/\1/' )
+                                export AWS_INSTANCEID=$(echo ${AWS_INSTANCEID} | sed 's/^"\(.*\)"$/\1/' )
+                                export AWS_CMD=/usr/bin/aws
+
+                                MYSTACKID=$(${AWS_CMD} ec2 describe-tags --filters "Name=resource-id,Values=${AWS_INSTANCEID}" | ${JQ_COMMAND} '.Tags[] | select(.Key=="aws:cloudformation:stack-id") | .Value')
+                                MYSTACKID=$(echo ${MYSTACKID} | sed 's/^"\(.*\)"$/\1/' )
+                                MYSTACKPARENT=$(echo ${MYSTACKID} | awk -F '/' '{print $2}' | awk -F'-' '{print $1}')
+
+                                MYPRIVATEIP=$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document \
+                                            | ${JQ_COMMAND} '.privateIp' \
+                                            | sed 's/^"\(.*\)"$/\1/' )
+
+
+                                log() {
+                                  echo $* 2>&1
+                                }
+
+                                usage() {
+                                    cat <<EOF
+                                    Usage: $0 [options]
+                                        -h print usage
+                                        -c Create DyanamoDB Table
+                                        -b Block until table is created
+                                        -d Delete table
+                                        -s Update "Status" column
+                                        -u Insert/Update Item (key=value pair)
+                                        -n Table Name (optional. Default name is CFN stackname)
+                                        -q Query number of nodes in a given state
+                                        -w Wait until N nodes reach a specific state (COMPLETE=N)
+                                        -p Print Table
+                                        -g Print IPv4 Adrresses
+                                EOF
+                                #    exit 0
+                                }
+
+
+
+                                # ------------------------------------------------------------------
+                                #          Read all inputs
+                                # ------------------------------------------------------------------
+
+
+                                CREATE=0
+                                PRINT=0
+                                BLOCK_UNTIL_TABLE_LIVE=0
+                                DELETE_TABLE=0
+                                GET_IPv4=0
+                                CREATE_KEY=0
+                                FETCH_KEY=0
+
+                                [[ $# -eq 0 ]] && usage;
+
+                                while getopts "hcbpdgikfs:u:n:q:w:" o; do
+                                  case "${o}" in
+                                    h) usage && exit 0
+                                    ;;
+                                    c) CREATE=1
+                                    ;;
+                                    p) PRINT=1
+                                    ;;
+                                    b) BLOCK_UNTIL_TABLE_LIVE=1
+                                    ;;
+                                    d) DELETE_TABLE=1
+                                    ;;
+                                    g) GET_IPv4=1
+                                    ;;
+                                    q) QUERY_STATUS=${OPTARG}
+                                    ;;
+                                    s) NEW_STATUS=${OPTARG}
+                                    ;;
+                                    k) CREATE_KEY=1
+                                    ;;
+                                    f) FETCH_KEY=1
+                                    ;;
+                                    u) NEW_ITEM_PAIR=${OPTARG}
+                                    ;;
+                                    n) TABLE_NAME=${OPTARG}
+                                    ;;
+                                    w) WAIT_STATUS_COUNT_PAIR=${OPTARG}
+                                    ;;
+                                    i) INIT_ENV=1
+                                    ;;
+                                  esac
+                                done
+
+                                # ------------------------------------------------------------------
+                                #          Make sure all input parameters are filled
+                                # ------------------------------------------------------------------
+
+                                shift $((OPTIND-1))
+                                [[ $# -gt 0 ]] && usage;
+
+                                if [ -z ${TABLE_NAME} ]; then
+                                  export TABLE_NAME=${MYSTACKPARENT}-DDB-Table
+                                  echo "Table name not specified. Using ${TABLE_NAME}"
+                                fi
+
+
+
+                                # ------------------------------------------------------------------
+                                #          Status of Table creation
+                                # ------------------------------------------------------------------
+
+                                GetCreationStatus() {
+                                    status=$(${AWS_CMD} dynamodb describe-table --table-name ${TABLE_NAME} --query Table.TableStatus)
+                                    echo $status
+                                }
+
+                                # ------------------------------------------------------------------
+                                #          Wait until Table is created and Active
+                                # ------------------------------------------------------------------
+
+                                WaitUntilTableActive() {
+                                    while true; do
+                                    status=$(GetCreationStatus)
+                                    log "${TABLE_NAME}:${status}"
+                                    log ${status}
+                                        case "$status" in
+                                          *ACTIVE* ) break;;
+                                        esac
+                                    sleep 10
+                                    done
+                                }
+
+
+                                IfTableFound() {
+                                  status=$(${AWS_CMD} dynamodb describe-table --table-name ${TABLE_NAME} 2>&1)
+                                  [[ ${status} == *"not found"* ]] && echo 0 && return
+                                  echo 1
+                                }
+
+
+                                # ------------------------------------------------------------------
+                                #  Used in multinode scenario when master created the table
+                                #	 Worker nodes will just wait until table is ready
+                                # ------------------------------------------------------------------
+
+                                WaitUntilTableLive() {
+                                    while true; do
+                                    status=$(IfTableFound)
+                                    if [ $status -eq 0 ]; then
+                                      echo "Waiting for Master to create table.."
+                                      sleep 10
+                                    else
+                                      echo "Master has created table!"
+                                      break
+                                    fi
+                                  done
+                                }
+
+
+                                # ------------------------------------------------------------------
+                                #          Create dynamodb table to do handshake of multinodes
+                                #          Remember you can add other columns anytime!
+                                # ------------------------------------------------------------------
+
+                                CreateTable() {
+                                  log "CreateTable ${TABLE_NAME}..."
+                                    ${AWS_CMD} dynamodb create-table \
+                                        --table-name ${TABLE_NAME} \
+                                        --attribute-definitions \
+                                            AttributeName=PrivateIpAddress,AttributeType=S \
+                                        --key-schema \
+                                            AttributeName=PrivateIpAddress,KeyType=HASH \
+                                        --provisioned-throughput ReadCapacityUnits=1,WriteCapacityUnits=1
+
+                                    log "Waiting for table creation"
+                                    WaitUntilTableActive
+                                    log "DynamoDB Table: ${TABLE_NAME} Ready!"
+                                }
+
+
+
+                                # ------------------------------------------------------------------
+                                #          Delete table to make a clean start deploy
+                                # ------------------------------------------------------------------
+
+                                DeleteTable() {
+                                  status=$(IfTableFound)
+                                  if [ $status -eq 0 ]; then
+                                    echo "Table doesn't exist. No need to delete"
+                                    return
+                                  fi
+                                  status=$(${AWS_CMD} dynamodb delete-table --table-name ${TABLE_NAME})
+                                  WaitUntilTableDead
+                                }
+
+                                # ------------------------------------------------------------------
+                                #    Wait until table is fully deleted!
+                                # ------------------------------------------------------------------
+
+                                WaitUntilTableDead() {
+                                    while true; do
+                                        status=$(IfTableFound)
+                                    if [ $status -eq 1 ]; then
+                                      echo "Waiting for table delete to complete!.."
+                                      sleep 10
+                                    else
+                                      echo "Master has deleted table!"
+                                      break
+                                    fi
+                                  done
+                                }
+
+
+                                # ------------------------------------------------------------------
+                                #          Initialize the dynamodb table
+                                #          PrivateIpAddress, Status and InstanceId columns init
+                                # ------------------------------------------------------------------
+
+                                InitMyTable() {
+                                    myip=${MYPRIVATEIP}
+                                    json_template='{ "PrivateIpAddress": {"S": "myip" }}'
+                                    json=$(echo ${json_template} | sed "s/myip/${myip}/g")
+                                    ${AWS_CMD} dynamodb put-item --table-name ${TABLE_NAME}  --item "${json}"
+                                    instanceid=$(curl http://169.254.169.254/latest/meta-data/instance-id)
+                                    InsertMyKeyValueS "InstanceId=${instanceid}"
+                                }
+
+
+
+
+                                # ------------------------------------------------------------------
+                                #          Update or insert table item with new key=value pair
+                                #          New attributes get added, old attributes get updated
+                                #          Use private ip as primary hash key
+                                #          Usage InsertMyKeyValueS key=value
+                                # ------------------------------------------------------------------
+
+                                InsertMyKeyValueS() {
+
+                                    keyvalue=$1
+                                    if [ -z "$keyvalue" ]; then
+                                        echo "Invalid KeyPair Values!"
+                                        return
+                                    fi
+                                    key=$(echo $keyvalue | awk -F'=' '{print $1}')
+                                    value=$(echo $keyvalue | awk -F'=' '{print $2}')
+
+                                    keyjson_template='{"PrivateIpAddress": {
+                                        "S": "myip"
+                                        }}'
+                                    myip=${MYPRIVATEIP}
+                                    keyjson=$(echo -n ${keyjson_template} | sed "s/myip/${myip}/g")
+
+                                    insertjson_template='{"key": {
+                                                "Value": {
+                                                    "S": "value"
+                                                },
+                                                "Action": "PUT"
+                                            }
+                                        }'
+
+                                    insertjson=$(echo -n ${insertjson_template} | sed "s/key/${key}/g")
+                                    insertjson=$(echo -n ${insertjson} | sed "s/value/${value}/g")
+                                    cmd=$(echo  "${AWS_CMD} dynamodb update-item --table-name ${TABLE_NAME} --key '${keyjson}' --attribute-updates '${insertjson}'")
+                                  log "${cmd}"
+                                    echo ${cmd} | sh
+                                }
+
+                                FetchAuthKey() {
+                                    AuthKey=$(${AWS_CMD} dynamodb scan --table-name ${TABLE_NAME} | ${JQ_COMMAND}  '.Items[]|.AuthKey|.S' | grep -v "null")
+                                    AuthKey=$(echo ${AuthKey} | sed s/\"//g)
+                                    AuthKey=$(echo ${AuthKey} | sed s/\ //g)
+                                    echo ${AuthKey}
+                                }
+
+                                # ------------------------------------------------------------------
+                                #          Use private ip as primary hash key
+                                #          Set Status of node
+                                #          Usage SetMyStatus "INSTALL_STARTED"
+                                #                SetMyStatus "INSTALL_COMPLETE" etc
+                                # ------------------------------------------------------------------
+
+                                SetMyStatus() {
+                                    status=$1
+                                    if [ -z "$status" ]; then
+                                        echo "Invalid Status Update!"
+                                        return
+                                    fi
+                                    keyjson_template='{"PrivateIpAddress": {
+                                        "S": "myip"
+                                        }}'
+                                    myip=${MYPRIVATEIP}
+                                    keyjson=$(echo -n ${keyjson_template} | sed "s/myip/${myip}/g")
+
+                                    updatejson_template='{"Status": {
+                                                "Value": {
+                                                    "S": "mystatus"
+                                                },
+                                                "Action": "PUT"
+                                            }
+                                        }'
+
+                                    updatejson=$(echo -n ${updatejson_template} | sed "s/mystatus/${status}/g")
+                                    cmd=$(echo  "${AWS_CMD} dynamodb update-item --table-name ${TABLE_NAME} --key '${keyjson}' --attribute-updates '${updatejson}'")
+                                    echo "${AWS_CMD} dynamodb update-item --table-name ${TABLE_NAME} --key '${keyjson}' --attribute-updates '${updatejson}'"
+                                    echo ${cmd} | sh
+
+                                }
+
+
+                                # ------------------------------------------------------------------
+                                #          Use Status column in DDB to orchestrate
+                                #          Count number of hosts in specific state
+                                #          When querying for nodes in WORKING state,
+                                #          proceed if WORKING + FINISHED count >= EXPECTED_COUNT
+                                #          This is necessary because secondary may move to FINISHED state before primary.
+                                #          Usage: QueryStatusCount "INSTALL_COMPLETE"
+                                #                 Get total hosts which have Status=INSTALL_COMPLETE
+                                # ------------------------------------------------------------------
+
+                                QueryStatusCount(){
+                                    status=$1
+                                    if [ -z "$status" ]; then
+                                        echo "StatusCountQuery invalid!"
+                                        return
+                                    fi
+                                    count=$(${AWS_CMD} dynamodb scan --table-name ${TABLE_NAME} --scan-filter '
+                                            { "Status" : {
+                                                "AttributeValueList": [
+                                                    {
+                                                        "S": '\"${status}\"'
+                                                    }
+                                                ],
+                                                "ComparisonOperator":"EQ"
+                                                }} ' | ${JQ_COMMAND}  '.Items[]|.PrivateIpAddress|.S' | wc -l)
+
+                                    if [ "$status" == "WORKING" ]; then
+                                        finished_count=$(${AWS_CMD} dynamodb scan --table-name ${TABLE_NAME} --scan-filter '
+                                            { "Status" : {
+                                                "AttributeValueList": [
+                                                    {
+                                                        "S": '\"FINISHED\"'
+                                                    }
+                                                ],
+                                                "ComparisonOperator":"EQ"
+                                                }} ' | ${JQ_COMMAND}  '.Items[]|.PrivateIpAddress|.S' | wc -l)
+                                    fi
+
+                                    re='^[0-9]+$'
+                                    if ! [[ $count =~ $re ]] ; then
+                                        count=0
+                                    fi
+
+                                    if ! [[ $finished_count =~ $re ]] ; then
+                                        finished_count=0
+                                    fi
+
+                                    echo $((count + finished_count))
+                                }
+
+                                # ------------------------------------------------------------------
+                                #          Get Local IPv4 Addresses from DDB
+                                #          Usage: GetIPv4Addrs
+                                #                 Get list of IPv4 Adrresses
+                                # ------------------------------------------------------------------
+
+                                GetIPv4Addrs(){
+                                    IPv4=$(${AWS_CMD} dynamodb scan --table-name ${TABLE_NAME} | ${JQ_COMMAND}  '.Items[]|.PrivateIpAddress|.S')
+                                    IPv4=$(echo ${IPv4} | sed s/\"//g)
+                                    echo ${IPv4}
+                                }
+
+
+                                # ------------------------------------------------------------------
+                                #          Wait until specific number hosts reach specific state
+                                #          To wait until 5 nodes reach "INSTALL_COMPLETE" status:
+                                #          Usage: WaitForSpecificStatus "INSTALL_COMPLETE=5" etc.
+                                # ------------------------------------------------------------------
+
+                                WaitForSpecificStatus() {
+                                	log "WaitForSpecificStatus START ($1) in cluster-watch-engine.sh"
+
+                                    status_count_pair=$1
+                                    if [ -z "$status_count_pair" ]; then
+                                        echo "Invalid Status=count Values!"
+                                        return
+                                    fi
+                                    log "Received ${status_count_pair} in cluster-watch-engine.sh"
+                                    status=$(echo $status_count_pair | /usr/bin/awk -F'=' '{print $1}')
+                                    expected_count=$(echo $status_count_pair | /usr/bin/awk -F'=' '{print $2}')
+                                    log "Checking for ${status} = ${expected_count} times"
+
+                                    while true; do
+                                      count=$(QueryStatusCount ${status})
+                                      log "${count}..."
+                                      if [ "${count}" -lt "${expected_count}" ]; then
+                                        log "${count}/${expected_count} in ${status} status...Waiting"
+                                        sleep 10
+                                      else
+                                        log "${count} out of ${expected_count} in ${status} status!"
+                                        log "WaitForSpecificStatus END ($1) in cluster-watch-engine.sh"
+                                        return
+                                      fi
+                                    done
+
+                                }
+
+                                # ------------------------------------------------------------------
+                                #          Print table
+                                # ------------------------------------------------------------------
+
+                                Print() {
+                                    ${AWS_CMD} dynamodb scan --table-name ${TABLE_NAME}
+                                }
+
+
+                                if [ $CREATE -eq 1 ]; then
+                                    CreateTable ${TABLE_NAME}
+                                    InitMyTable
+                                fi
+
+                                if [ $GET_IPv4 -eq 1 ]; then
+                                    GetIPv4Addrs
+                                fi
+
+                                if [ $NEW_STATUS ]; then
+                                    SetMyStatus ${NEW_STATUS}
+                                fi
+
+                                if [ $NEW_ITEM_PAIR ]; then
+                                    InsertMyKeyValueS ${NEW_ITEM_PAIR}
+                                fi
+
+                                if [ $CREATE_KEY -eq 1 ]; then
+                                    auth_key=$( openssl rand -base64 756 | grep -o [[:alnum:]] | tr -d '\n' )
+                                    InsertMyKeyValueS "AuthKey=${auth_key}"
+                                fi
+
+                                if [ $FETCH_KEY -eq 1 ]; then
+                                    FetchAuthKey
+                                fi
+
+                                if [ $QUERY_STATUS ]; then
+                                    QueryStatusCount $QUERY_STATUS
+                                fi
+
+
+                                if [ $WAIT_STATUS_COUNT_PAIR ]; then
+                                    WaitForSpecificStatus $WAIT_STATUS_COUNT_PAIR
+                                fi
+
+
+                                if [ $PRINT -eq 1 ]; then
+                                    Print
+                                fi
+
+                                if [ $BLOCK_UNTIL_TABLE_LIVE -eq 1 ]; then
+                                	WaitUntilTableLive
+                                fi
+
+                                if [ $DELETE_TABLE -eq 1 ]; then
+                                	DeleteTable
+                                fi
+                            mode: '000777'
+                        /home/ec2-user/mongodb/config.sh:
+                            content: !Sub |
+                                export TABLE_NAMETAG=_${StackName}
+                                export MongoDBVersion=${MongoDBVersion}
+                                export VPC=${VPC}
+                                export MONGODB_ADMIN_USER=${MongoDBAdminUsername}
+                    commands:
+                        command_0:
+                            cwd: /home/ec2-user/mongodb
+                            command: chkconfig --add disable-transparent-hugepages
+                        command_1:
+                            command: mkdir -p /mongo_auth
+                        command_2:
+                            cwd: /home/ec2-user/mongodb
+                            command: ./init.sh > install.log 2>&1
+        Properties:
+            NetworkInterfaces:
+            -   NetworkInterfaceId: !Ref ReplicaNodeNetworkInterface
+                DeviceIndex: '0'
+            KeyName: !Ref KeyName
+            ImageId: !Ref ImageId
+            IamInstanceProfile: !Ref MongoDBNodeIAMProfileID
+            Tags:
+            -   Key: Name
+                Value: !Ref ReplicaNodeNameTag
+            -   Key: ClusterReplicaSetCount
+                Value: !Ref ClusterReplicaSetCount
+            -   Key: NodeReplicaSetIndex
+                Value: !Ref NodeReplicaSetIndex
+            -   Key: ReplicaShardIndex
+                Value: !Ref ReplicaShardIndex
+            BlockDeviceMappings:
+            -   DeviceName: /dev/xvdg
+                Ebs:
+                    VolumeType: io1
+                    DeleteOnTermination: 'true'
+                    VolumeSize: '25'
+                    Iops: '250'
+                    Encrypted: 'true'
+            -   DeviceName: /dev/xvdh
+                Ebs:
+                    VolumeType: io1
+                    DeleteOnTermination: 'true'
+                    VolumeSize: '25'
+                    Iops: '200'
+                    Encrypted: 'true'
+            -   DeviceName: /dev/xvdf
+                Ebs:
+                    VolumeSize: !Ref VolumeSize
+                    VolumeType: !Ref VolumeType
+                    Iops: !If
+                    - UsePIops
+                    - !Ref Iops
+                    - !Ref 'AWS::NoValue'
+                    DeleteOnTermination: 'true'
+                    Encrypted: 'true'
+            UserData:
+                Fn::Base64:
+                  !Sub |
+                    #!/bin/bash
+                    /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource ReplicaNodeInstance --region ${AWS::Region};
+                    /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource ReplicaNodeInstance --region ${AWS::Region};
+            InstanceType: !Ref NodeInstanceType
+        CreationPolicy:
+            ResourceSignal:
+                Timeout: PT20M
+    NodeInstanceRecoveryAlarm:
+        Type: 'AWS::CloudWatch::Alarm'
+        Properties:
+            AlarmDescription: >-
+                EC2 Autorecovery for Node Instance. Autorecover if we fail EC2 status
+                checks for 5 minutes.
+            Namespace: AWS/EC2
+            MetricName: StatusCheckFailed_System
+            Statistic: Minimum
+            Period: '60'
+            EvaluationPeriods: '5'
+            ComparisonOperator: GreaterThanThreshold
+            Threshold: '0'
+            AlarmActions:
+            - !Sub arn:aws:automate:${AWS::Region}:ec2:recover
+            Dimensions:
+            -   Name: InstanceId
+                Value: !Ref ReplicaNodeInstance
+Outputs:
+    NodePrivateIp:
+        Value: !GetAtt
+        - ReplicaNodeInstance
+        - PrivateIp
+        Description: Private IP Address of Node Instance
+    NodeInstanceID:
+        Description: The Instance ID
+        Value: !Ref ReplicaNodeInstance
+    NodeNameTag:
+        Description: Node Name Tag
+        Value: !Ref ReplicaNodeNameTag

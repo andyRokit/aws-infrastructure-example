@@ -1,0 +1,64 @@
+Description: System
+
+Metadata:
+    'AWS::CloudFormation::Interface':
+        ParameterGroups:
+        -   Label:
+                default: MongoDB
+            Parameters:
+            - KeyPairName
+            - MongoDBAdminUsername
+            - MongoDBAdminPassword
+
+Parameters:
+    KeyPairName:
+        Type: 'AWS::EC2::KeyPair::KeyName'
+        Default: home
+        Description: To enable access to MongoDB EC2s
+
+    MongoDBAdminUsername:
+        Default: admin
+        Description: MongoDB admin account username
+        Type: String
+        MinLength: '1'
+        MaxLength: '16'
+        AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+        ConstraintDescription: must begin with a letter and contain only alphanumeric characters.
+    MongoDBAdminPassword:
+        AllowedPattern: '([A-Za-z0-9_@-]{8,32})'
+        ConstraintDescription: >-
+            Input your MongoDB database password, Min 8, Maximum of 32 characters. .
+            Allowed characters are: [A-Za-z0-9_@-]
+        Description: 'Enter your MongoDB Database Password, Min 8, maximum of 32 characters.'
+        NoEcho: 'true'
+        Type: String
+
+Resources:
+
+    Infrastructure:
+        Type: AWS::CloudFormation::Stack
+        Properties:
+            TemplateURL: ./infrastructure/main.yaml
+            Parameters:
+                EnvironmentName: !Ref AWS::StackName
+                KeyPairName: !Ref KeyPairName
+                MongoDBAdminUsername: !Ref MongoDBAdminUsername
+                MongoDBAdminPassword: !Ref MongoDBAdminPassword
+
+    ExampleService:
+        Type: AWS::CloudFormation::Stack
+        Properties:
+            TemplateURL: ./services/example-service/main.yaml
+            Parameters:
+                EnvironmentName: !Ref AWS::StackName
+                VPC: !GetAtt Infrastructure.Outputs.VPC
+                Subnets: !GetAtt Infrastructure.Outputs.PrivateSubnets
+                ECSCluster: !GetAtt Infrastructure.Outputs.ECSCluster
+                ECSTaskExecutionRoleArn: !GetAtt Infrastructure.Outputs.ECSTaskExecutionRoleArn
+                DesiredCount: 2
+                Path: v1/example
+                SQSEncryptionKey: !GetAtt Infrastructure.Outputs.SQSEncryptionKey
+                ApiGatewayRef: !GetAtt Infrastructure.Outputs.ApiGatewayRef
+                ApiGatewayResourceId: !GetAtt Infrastructure.Outputs.ApiGatewayResourceId
+                LoadBalancerArn: !GetAtt Infrastructure.Outputs.LoadBalancerArn
+                LoadBalancerVpcLinkArn: !GetAtt Infrastructure.Outputs.LoadBalancerVpcLinkArn

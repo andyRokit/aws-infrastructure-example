@@ -1,0 +1,211 @@
+Description: System -> example Service
+
+Parameters:
+
+    VPC:
+        Description: The VPC that the ECS cluster is deployed to
+        Type: AWS::EC2::VPC::Id
+
+    Subnets:
+        Description: Choose which subnets this service cluster should be deployed to
+        Type: List<AWS::EC2::Subnet::Id>
+
+    ECSCluster:
+        Description: Please provide the ECS Cluster ID that this service should run on
+        Type: String
+
+    ECSTaskExecutionRoleArn:
+        Description: ECS task execution role
+        Type: String
+
+    DesiredCount:
+        Description: How many instances of this task should we run across our cluster?
+        Type: Number
+        Default: 2
+
+    Path:
+        Description: The path to register with the Application Load Balancer
+        Type: String
+
+    EnvironmentName:
+        Description: The Name of the current environment
+        Type: String
+
+    SQSEncryptionKey:
+        Description: Encryption Key Used For SQS
+        Type: String
+
+    ApiGatewayRef:
+        Description: API gateway ref
+        Type: String
+
+    ApiGatewayResourceId:
+        Description: API gateway resource ID
+        Type: String
+
+    LoadBalancerArn:
+        Description: Load Balancer ARN
+        Type: String
+
+    LoadBalancerVpcLinkArn:
+        Description: VPC Link for the Load Balancer ARN
+        Type: String
+
+Resources:
+
+    ServiceSecurityGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            VpcId: !Ref VPC
+            GroupDescription: Currently allows all inbound calls.  If possible lock this down to the NLB (doesnt currently support Security Groups).
+            #See https://forums.aws.amazon.com/thread.jspa?threadID=263245
+            SecurityGroupIngress:
+            -   IpProtocol: -1
+                CidrIp: 0.0.0.0/0
+            Tags:
+            -   Key: Name
+                Value: !Sub ${EnvironmentName}-Service-Security-Group
+
+    Service:
+        Type: AWS::ECS::Service
+        Properties:
+            Cluster: !Ref ECSCluster
+            LaunchType: FARGATE
+            DesiredCount: !Ref DesiredCount
+            TaskDefinition: !Ref TaskDefinition
+            LoadBalancers:
+            -   ContainerName: "example-service"
+                ContainerPort: 8080
+                TargetGroupArn: !Ref TargetGroup
+            HealthCheckGracePeriodSeconds: 300
+            NetworkConfiguration:
+                AwsvpcConfiguration:
+                    Subnets: !Ref Subnets
+                    SecurityGroups:
+                    - !Ref ServiceSecurityGroup
+
+
+    TaskDefinition:
+        Type: AWS::ECS::TaskDefinition
+        Properties:
+            Family: example-service
+            Cpu: 256
+            Memory: 1024
+            NetworkMode: awsvpc
+            RequiresCompatibilities:
+            - FARGATE
+            TaskRoleArn: !GetAtt TaskRole.Arn
+            ExecutionRoleArn: !Ref ECSTaskExecutionRoleArn
+            ContainerDefinitions:
+            -   Name: example-service
+                Environment:
+                -   Name: JAVA_OPTS
+                    Value: -Xmx512m -Xmx512m -Xss512k
+                Essential: true
+                Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/example-service
+                PortMappings:
+                -   ContainerPort: 8080
+                LogConfiguration:
+                    LogDriver: awslogs
+                    Options:
+                        awslogs-group: !Ref TaskLogGroup
+                        awslogs-region: !Ref AWS::Region
+                        awslogs-stream-prefix: !Sub ${EnvironmentName}-example-service
+
+    TaskLogGroup:
+        Type: AWS::Logs::LogGroup
+        Properties:
+            LogGroupName: !Sub ${EnvironmentName}-example-service
+            RetentionInDays: 365
+
+    TaskRole:
+        Type: AWS::IAM::Role
+        Properties:
+            Path: /
+            AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                -   Effect: Allow
+                    Principal:
+                        Service: ecs-tasks.amazonaws.com
+                    Action: sts:AssumeRole
+            Policies:
+            -   PolicyName: example-service-policy
+                PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                    -   Effect: Allow
+                        Action:
+                        - dynamodb:*
+                        - sqs:*
+                        #                       TODO: Lock this down to the required resources
+                        Resource: '*'
+
+    TaskExecutionRole:
+        Type: AWS::IAM::Role
+        Properties:
+            Path: /
+            AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                -   Effect: Allow
+                    Principal:
+                        Service: ecs-tasks.amazonaws.com
+                    Action: sts:AssumeRole
+            ManagedPolicyArns:
+            - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+    TargetGroup:
+        Type: AWS::ElasticLoadBalancingV2::TargetGroup
+        Properties:
+            VpcId: !Ref VPC
+            TargetType: ip
+            Port: 80
+            Protocol: TCP
+            HealthCheckIntervalSeconds: 30
+            HealthCheckProtocol: HTTP
+            HealthCheckPath: !Sub /${Path}/health
+
+    LoadBalancerListener:
+        Type: AWS::ElasticLoadBalancingV2::Listener
+        Properties:
+            LoadBalancerArn: !Ref LoadBalancerArn
+            Port: 10001
+            Protocol: TCP
+            DefaultActions:
+            -   Type: forward
+                TargetGroupArn: !Ref TargetGroup
+
+    ServiceResource:
+        Type: AWS::ApiGateway::Resource
+        Properties:
+            RestApiId: !Ref ApiGatewayRef
+            ParentId: !Ref ApiGatewayResourceId
+            PathPart: example
+
+    ProxyResource:
+        Type: AWS::ApiGateway::Resource
+        Properties:
+            RestApiId: !Ref ApiGatewayRef
+            ParentId: !Ref ServiceResource
+            PathPart: '{proxy+}'
+
+    Method:
+        Type: AWS::ApiGateway::Method
+        Properties:
+            RestApiId: !Ref ApiGatewayRef
+            ResourceId: !Ref ProxyResource
+            HttpMethod: ANY
+            AuthorizationType: NONE
+            RequestParameters:
+                method.request.path.proxy: true
+            Integration:
+                Type: HTTP_PROXY
+                ConnectionType: VPC_LINK
+                IntegrationHttpMethod: ANY
+                ConnectionId: !Ref LoadBalancerVpcLinkArn
+                Uri: !Sub 'http://fake-domain.com:10001/${Path}/{proxy}'
+                CacheKeyParameters:
+                - method.request.path.proxy
+                RequestParameters:
+                    integration.request.path.proxy: method.request.path.proxy

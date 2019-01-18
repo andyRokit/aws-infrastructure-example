@@ -1,0 +1,32 @@
+Description: System -> Infrastructure -> KMS
+
+Parameters:
+
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    Type: String
+
+Resources:
+  SQSEncryptionKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Key used to encrypt all SQS queues
+      Enabled: true
+      EnableKeyRotation: false
+      KeyPolicy:
+        Version: 2012-10-17
+        Id: test
+        Statement:
+        - Sid: Enable IAM User Permissions
+          Effect: Allow
+          Principal:
+            AWS: "*"
+          Action:
+            - kms:*
+          Resource: "*"
+
+Outputs:
+
+  SQSEncryptionKey:
+    Description: SQS Ecryption Key
+    Value: !Ref SQSEncryptionKey
